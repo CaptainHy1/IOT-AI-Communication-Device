@@ -1,0 +1,12 @@
+
+# Chặn thư mục môi trường ảo Python
+BE/venv/
+venv/
+.venv/
+
+# Chặn các file cấu hình môi trường bảo mật
+.env
+
+# Chặn các file cache của Python
+__pycache__/
+*.pyc

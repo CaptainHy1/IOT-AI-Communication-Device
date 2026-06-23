@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ICD Dashboard — ESP32 ↔ Server</title>
+    <style>
+      :root {
+        --esp: #2563eb;
+        --srv: #059669;
+        --back: #7c3aed;
+        --err: #dc2626;
+        --bg: #f0f4f8;
+        --card: #fff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: "Segoe UI", Inter, Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background: var(--bg);
+        color: #1e293b;
+      }
+      h1 { margin: 0 0 4px; font-size: 1.5rem; }
+      .subtitle { color: #64748b; margin-bottom: 16px; font-size: 0.9rem; }
+      .grid {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 16px;
+        align-items: start;
+      }
+      @media (max-width: 800px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+      .card {
+        background: var(--card);
+        border-radius: 10px;
+        padding: 14px;
+        box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      }
+      .card h3 { margin: 0 0 10px; font-size: 0.95rem; color: #475569; }
+      .device {
+        padding: 8px 10px;
+        border-left: 3px solid var(--esp);
+        background: #eff6ff;
+        border-radius: 4px;
+        margin-bottom: 8px;
+        font-size: 0.85rem;
+      }
+      .device-id { font-family: monospace; font-weight: 600; }
+      .device-status { color: #64748b; font-size: 0.78rem; margin-top: 2px; }
+      .flow-diagram {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 12px;
+        background: #f8fafc;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        font-size: 0.85rem;
+      }
+      .node {
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-weight: 600;
+        text-align: center;
+      }
+      .node-esp { background: #dbeafe; color: var(--esp); border: 2px solid var(--esp); }
+      .node-srv { background: #d1fae5; color: var(--srv); border: 2px solid var(--srv); }
+      .arrow { color: #94a3b8; font-size: 1.2rem; }
+      .state-badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 99px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: #fef3c7;
+        color: #92400e;
+      }
+      #timeline {
+        max-height: 340px;
+        overflow-y: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 8px;
+        background: #fafafa;
+      }
+      .tl-item {
+        display: flex;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        margin-bottom: 4px;
+        font-size: 0.82rem;
+        line-height: 1.4;
+        animation: fadeIn .25s ease;
+      }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+      .tl-item.esp { background: #eff6ff; border-left: 3px solid var(--esp); }
+      .tl-item.srv { background: #ecfdf5; border-left: 3px solid var(--srv); }
+      .tl-item.back { background: #f5f3ff; border-left: 3px solid var(--back); }
+      .tl-item.err { background: #fef2f2; border-left: 3px solid var(--err); }
+      .tl-time { color: #94a3b8; font-family: monospace; white-space: nowrap; min-width: 68px; }
+      .tl-dir { font-weight: 700; white-space: nowrap; min-width: 110px; }
+      .tl-step { font-weight: 600; min-width: 100px; }
+      .tl-detail { color: #475569; word-break: break-word; }
+      .result-box {
+        margin-top: 12px;
+        padding: 10px;
+        background: #f8fafc;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+      }
+      .result-box label {
+        display: block;
+        font-size: 0.75rem;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin-bottom: 4px;
+      }
+      .result-box p { margin: 0 0 10px; font-size: 0.95rem; }
+      audio { width: 100%; margin-top: 4px; }
+      .controls { display: flex; gap: 8px; margin-top: 10px; }
+      button {
+        padding: 7px 12px;
+        border-radius: 6px;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
+      button:hover { background: #f1f5f9; }
+      .conn-dot {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: #22c55e;
+        margin-right: 6px;
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+      .conn-dot.off { background: #ef4444; animation: none; }
+    </style>
+  </head>
+  <body>
+    <h1>ICD Voice Dashboard</h1>
+    <p class="subtitle">
+      <span class="conn-dot" id="connDot"></span>
+      <span id="connLabel">Đang kết nối...</span>
+      — Theo dõi tương tác ESP32 ↔ Server theo thời gian thực
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Thiết bị ESP32</h3>
+        <div id="devices"><div class="device-status">Chưa có thiết bị</div></div>
+        <div class="controls">
+          <button id="refreshBtn">Refresh</button>
+          <button id="clearBtn">Xóa log</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="flow-diagram">
+          <div class="node node-esp">ESP32<br><small>Mic + Nút</small></div>
+          <div class="arrow">⇄ WebSocket</div>
+          <div class="node node-srv">Server<br><small>STT → LLM → TTS</small></div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <h3 style="margin:0;flex:1">Timeline tương tác</h3>
+          <span class="state-badge" id="stateBadge">Chờ ESP32</span>
+        </div>
+        <div id="timeline"></div>
+
+        <div class="result-box">
+          <label>Bạn nói (STT)</label>
+          <p id="lastTranscript">—</p>
+          <label>Trợ lý trả lời</label>
+          <p id="lastAnswer">—</p>
+          <audio id="ttsPlayer" controls></audio>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const devicesDiv = document.getElementById("devices");
+      const timeline = document.getElementById("timeline");
+      const lastTranscript = document.getElementById("lastTranscript");
+      const lastAnswer = document.getElementById("lastAnswer");
+      const ttsPlayer = document.getElementById("ttsPlayer");
+      const stateBadge = document.getElementById("stateBadge");
+      const connDot = document.getElementById("connDot");
+      const connLabel = document.getElementById("connLabel");
+
+      let deviceList = [];
+      let incomingAudioChunks = [];
+      let expectingTts = false;
+      let expectedTtsSize = 0;
+
+      const STEP_LABELS = {
+        connected: "Kết nối",
+        disconnected: "Ngắt kết nối",
+        audio_chunk: "Nhận audio",
+        end_of_audio: "Hết ghi âm",
+        processing: "Đang xử lý",
+        pipeline_start: "Bắt đầu pipeline",
+        audio_ok: "Audio OK",
+        audio_error: "Lỗi audio",
+        stt_start: "STT bắt đầu",
+        stt_done: "STT xong",
+        stt_empty: "STT rỗng",
+        stt_error: "Lỗi STT",
+        llm_start: "LLM bắt đầu",
+        llm_done: "LLM xong",
+        llm_error: "Lỗi LLM",
+        tts_start: "TTS bắt đầu",
+        tts_done: "TTS xong",
+        tts_end: "Gửi TTS xong",
+        tts_error: "Lỗi TTS",
+        transcript: "Gửi transcript",
+        assistant_text: "Gửi câu trả lời",
+        playback_start: "Phát loa",
+        playback_done: "Phát xong",
+        playback_error: "Lỗi phát loa",
+        turn_complete: "Hoàn tất",
+        pong: "Pong",
+        buffer_reset: "Reset buffer",
+        warning: "Cảnh báo",
+        error: "Lỗi",
+        ws_error: "Lỗi WS",
+      };
+
+      function setState(text) {
+        stateBadge.textContent = text;
+      }
+
+      function addTimeline(direction, step, detail, sessionId) {
+        const item = document.createElement("div");
+        const isErr = step.includes("error") || step === "error";
+        let cls = "srv";
+        if (direction === "esp32->server") cls = "esp";
+        else if (direction === "server->esp32") cls = "back";
+        if (isErr) cls = "err";
+
+        item.className = `tl-item ${cls}`;
+        const sid = sessionId ? sessionId.slice(0, 8) : "";
+        item.innerHTML = `
+          <span class="tl-time">${new Date().toLocaleTimeString()}</span>
+          <span class="tl-dir">${direction === "esp32->server" ? "ESP→SRV" : direction === "server->esp32" ? "SRV→ESP" : "SERVER"}</span>
+          <span class="tl-step">${STEP_LABELS[step] || step}</span>
+          <span class="tl-detail">${detail || ""}${sid ? ` [${sid}]` : ""}</span>
+        `;
+        timeline.appendChild(item);
+        timeline.scrollTop = timeline.scrollHeight;
+      }
+
+      function renderDevices() {
+        devicesDiv.innerHTML = "";
+        if (!deviceList.length) {
+          devicesDiv.innerHTML = '<div class="device-status">Chưa có thiết bị kết nối</div>';
+          return;
+        }
+        deviceList.forEach((id) => {
+          const d = document.createElement("div");
+          d.className = "device";
+          d.innerHTML = `<div class="device-id">${id.slice(0, 8)}…</div><div class="device-status">Online — sẵn sàng ghi âm</div>`;
+          devicesDiv.appendChild(d);
+        });
+      }
+
+      const ws = new WebSocket(
+        `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/chat?type=browser`,
+      );
+
+      ws.onopen = () => {
+        connDot.classList.remove("off");
+        connLabel.textContent = "Dashboard đã kết nối server";
+        addTimeline("server", "connected", "Browser dashboard online");
+      };
+      ws.onclose = () => {
+        connDot.classList.add("off");
+        connLabel.textContent = "Mất kết nối — refresh trang";
+        setState("Offline");
+      };
+
+      ws.onmessage = async (evt) => {
+        if (evt.data instanceof Blob) {
+          const chunk = new Uint8Array(await evt.data.arrayBuffer());
+          incomingAudioChunks.push(chunk);
+          const received = incomingAudioChunks.reduce((s, c) => s + c.length, 0);
+          if (expectingTts && received >= expectedTtsSize) {
+            const full = new Uint8Array(received);
+            let offset = 0;
+            for (const c of incomingAudioChunks) {
+              full.set(c, offset);
+              offset += c.length;
+            }
+            const blob = new Blob([full.buffer], { type: "audio/mpeg" });
+            ttsPlayer.src = URL.createObjectURL(blob);
+            ttsPlayer.play().catch(() => {});
+            incomingAudioChunks = [];
+            expectingTts = false;
+            expectedTtsSize = 0;
+            setState("Phát TTS xong");
+          }
+          return;
+        }
+
+        let data;
+        try { data = JSON.parse(evt.data); } catch { return; }
+
+        const ev = data.event;
+        const sid = data.session_id || "";
+
+        if (ev === "interaction") {
+          addTimeline(data.direction, data.step, data.detail, sid);
+          if (data.step === "processing") setState("Đang xử lý...");
+          if (data.step === "stt_start") setState("Nhận dạng giọng nói...");
+          if (data.step === "llm_start") setState("AI đang trả lời...");
+          if (data.step === "tts_start" && data.direction === "server") setState("Tạo giọng nói...");
+          if (data.step === "playback_start") setState("Đang phát loa...");
+          if (data.step === "turn_complete") setState("Chờ ESP32");
+          return;
+        }
+
+        if (ev === "esp32_status") {
+          deviceList = data.devices || [];
+          renderDevices();
+          setState(deviceList.length ? "ESP32 online" : "Chờ ESP32");
+        } else if (ev === "esp32_connected") {
+          if (!deviceList.includes(data.session_id)) deviceList.push(data.session_id);
+          renderDevices();
+          addTimeline("esp32->server", "connected", "ESP32 vừa kết nối", sid);
+          setState("ESP32 online");
+        } else if (ev === "esp32_disconnected") {
+          deviceList = deviceList.filter((d) => d !== data.session_id);
+          renderDevices();
+          addTimeline("esp32->server", "disconnected", "ESP32 ngắt kết nối", sid);
+          setState(deviceList.length ? "ESP32 online" : "Chờ ESP32");
+        } else if (ev === "processing") {
+          setState("Đang xử lý...");
+        } else if (ev === "transcript") {
+          lastTranscript.textContent = data.text;
+          addTimeline("server->esp32", "transcript", data.text, sid);
+        } else if (ev === "assistant_text") {
+          lastAnswer.textContent = data.text;
+          addTimeline("server->esp32", "assistant_text", data.text, sid);
+        } else if (ev === "tts_start") {
+          expectingTts = true;
+          expectedTtsSize = data.size || 0;
+          incomingAudioChunks = [];
+          addTimeline("server->esp32", "tts_start", `${expectedTtsSize} bytes MP3`, sid);
+          setState("Nhận audio TTS...");
+        } else if (ev === "tts_end") {
+          addTimeline("server->esp32", "tts_end", "Hoàn tất stream TTS", sid);
+        } else if (ev === "stt_empty") {
+          addTimeline("server->esp32", "stt_empty", "Không nghe rõ", sid);
+          setState("STT rỗng");
+        } else if (ev === "error") {
+          addTimeline("server", "error", data.message, sid);
+          setState("Lỗi");
+        }
+      };
+
+      document.getElementById("refreshBtn").onclick = () => location.reload();
+      document.getElementById("clearBtn").onclick = () => { timeline.innerHTML = ""; };
+    </script>
+  </body>
+</html>
