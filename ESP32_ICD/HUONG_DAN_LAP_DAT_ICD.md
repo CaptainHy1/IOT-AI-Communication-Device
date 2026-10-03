@@ -1,218 +1,137 @@
-# Hướng dẫn lắp đặt hệ thống ICD Voice (ESP32)
+# Hướng Dẫn Lắp Đặt & Đấu Nối Phần Cứng ICD Voice (ESP32)
 
-Tài liệu này tổng hợp sơ đồ đấu nối và các lưu ý quan trọng để lắp đặt hệ thống ICD Voice ổn định, dễ kiểm tra và hạn chế lỗi nguồn.
-
----
-
-## 1) Danh sách linh kiện
-
-### Core
-- ESP32 Dev Module (USB-C hoặc Micro USB)
-
-### Audio
-- INMP441 (I2S Microphone)
-- MAX98357A (I2S Amplifier - module hàn sẵn)
-- Loa 4 Ohm 3W
-
-### Display
-- OLED 1.3 inch (SSD1306/SH1106 - I2C)
-
-### Nguồn
-- Pin 18650 x2 (mắc song song)
-- Mạch sạc TP4056 (có bảo vệ)
-- Module boost MT3608 (tăng lên 5V)
-- Công tắc ON/OFF
-- Tụ 470-1000uF (10-16V)
-- Hộp pin 18650 (khuyến nghị)
-
-### Điều khiển
-- Nút nhấn 6x6mm (2-3 cái)
+Tài liệu hướng dẫn chi tiết sơ đồ nguyên lý đấu nối, cấu hình phần cứng và quy trình lắp đặt cho hệ thống thiết bị giao tiếp thông minh **Intelligent Communication Device (ICD)**.
 
 ---
 
-## 2) Sơ đồ nguồn (quan trọng nhất)
+## 1. Danh Sách Linh Kiện Phần Cứng
+
+| STT | Tên linh kiện | Thông số / Chức năng | Ghi chú |
+|:---:|---|---|---|
+| 1 | **ESP32 DevKit V1** | Vi điều khiển trung tâm (WiFi + BLE, 30 hoặc 38 chân) | Nguồn cấp 5V qua chân VIN |
+| 2 | **INMP441** | Microphone kỹ thuật số chuẩn I2S MEMS | Chỉ dùng nguồn **3.3V** |
+| 3 | **MAX98357A** | Mạch khuếch đại âm thanh số chuẩn I2S Class-D (3W) | Nguồn cấp 5V |
+| 4 | **Loa toàn dải** | 4Ω 3W hoặc 8Ω 2W | Đấu vào SPK+ / SPK- của MAX98357A |
+| 5 | **OLED 0.96" hoặc 1.3"** | Màn hình hiển thị I2C (SSD1306 / SH1106, 128x64) | Nguồn cấp 3.3V |
+| 6 | **Nút nhấn (Tactile Push Button)** | 6x6x5mm 2 chân hoặc 4 chân | Nối chân GPIO4 xuống GND |
+| 7 | **Module MT3608** | Mạch tăng áp DC-DC Boost (Step-up lên 5V ổn định) | **Chỉnh đúng 5.0V** trước khi cắm tải |
+| 8 | **Module TP4056** | Mạch sạc pin Lithium 1S có bảo vệ ngắt xả quá áp | Cổng Type-C hoặc Micro USB |
+| 9 | **Pin 18650** | 1 hoặc 2 cell mắc song song (3.7V - 4.2V) | Khuyến nghị dung lượng ≥ 2000mAh |
+| 10 | **Tụ hóa (Electrolytic Capacitor)** | 470µF – 1000µF (10V - 16V) | **Bắt buộc** lọc nguồn chống sụt áp khi loa phát |
+| 11 | **Công tắc gạt ON/OFF** | 2 chân / 3 chân | Lắp nối tiếp ngõ ra pin trước mạch Boost |
+
+---
+
+## 2. Sơ Đồ Khối Nguồn Điện
+
+> [!CAUTION]
+> **Quy tắc an toàn sống còn:**
+> 1. Phải chỉnh biến trở trên mạch **MT3608 đạt đúng 5.0V** bằng đồng hồ VOM trước khi nối vào chân VIN của ESP32 và MAX98357A.
+> 2. Toàn bộ thiết bị (ESP32, Mic, Loa, OLED, Nguồn) **BẮT BUỘC PHẢI DÙNG CHUNG GND**.
 
 ```text
-Pin 18650 (2 viên song song)
-        |
-        v
-TP4056 (B+ / B-)
-        |
-        v
-OUT+ -> Công tắc -> MT3608 VIN+
-OUT- --------------> MT3608 VIN-
-        |
-        v
-MT3608 chỉnh 5V
-        |
-        v
-VOUT+ -> VIN ESP32 + VIN MAX98357A
-VOUT- -> GND chung
-```
-
-**Tụ lọc nguồn:**
-- Chân `+` của tụ -> `VOUT+`
-- Chân `-` của tụ -> `VOUT-`
-
-> **Bắt buộc**
-> - Chỉnh MT3608 đúng **5V** trước khi nối vào ESP32.
-> - Tất cả thiết bị phải dùng **chung GND**.
-
----
-
-## 3) Kết nối MIC (INMP441 - I2S)
-
-> Lưu ý: `GPIO25` (WS/LRCLK) và `GPIO26` (SCK/BCLK) là 2 chân clock I2S dùng chung cho cả MIC và AMP.
-> Đây là cấu hình bình thường của bus I2S, không phải xung đột chân.
-
-| INMP441 | ESP32 |
-|---|---|
-| VDD | 3.3V |
-| GND | GND |
-| WS | GPIO25 |
-| SCK | GPIO26 |
-| SD | GPIO33 |
-| L/R | GND |
-
----
-
-## 4) Kết nối loa (MAX98357A)
-
-| MAX98357A | ESP32 |
-|---|---|
-| VIN | 5V |
-| GND | GND |
-| LRC | GPIO25 |
-| BCLK | GPIO26 |
-| DIN | GPIO27 |
-
-> LRC/BCLK của amp phải đi cùng bus clock với mic (`GPIO25/26`) để đồng bộ âm thanh.
-
-**Đấu loa:**
-- `SPK+` -> loa `+`
-- `SPK-` -> loa `-`
-
----
-
-## 5) Kết nối OLED (khớp với code hiện tại)
-
-- OLED dùng bus I2C chuẩn của ESP32: `SDA=21`, `SCL=22`.
-- Để tránh trùng chân, `DIN` của MAX98357A đã chuyển sang `GPIO27`.
-
-| OLED | ESP32 |
-|---|---|
-| VCC | 3.3V |
-| GND | GND |
-| SDA | GPIO21 |
-| SCL | GPIO22 |
-
----
-
-## 6) Nút nhấn
-
-| Nút | ESP32 |
-|---|---|
-| Button | GPIO0 |
-
-- Dùng pull-up nội (`INPUT_PULLUP`).
-
----
-
-## 7) Bảng tổng hợp chân kết nối
-
-**Clock I2S dùng chung (không conflict):**
-- `GPIO25` = WS/LRCLK cho cả Mic và Amp
-- `GPIO26` = SCK/BCLK cho cả Mic và Amp
-
-| Module | Chân ESP32 |
-|---|---|
-| Mic WS | GPIO25 |
-| Mic SCK | GPIO26 |
-| Mic SD | GPIO33 |
-| Amp LRC | GPIO25 |
-| Amp BCLK | GPIO26 |
-| Amp DIN | GPIO27 |
-| OLED SDA | GPIO21 |
-| OLED SCL | GPIO22 |
-
----
-
-## 8) Lưu ý quan trọng
-
-1. **Không cấp pin trực tiếp vào ESP32**  
-   Luôn đi qua MT3608 đã chỉnh 5V.
-
-2. **Bắt buộc có tụ lọc**  
-   Giảm sụt áp, tránh reset khi loa hoạt động.
-
-3. **Nguồn cho loa phải đủ mạnh**  
-   Nguồn yếu gây rè, méo hoặc tắt tiếng.
-
-4. **GND phải nối chung toàn hệ thống**  
-   Nếu không sẽ phát sinh lỗi ngẫu nhiên.
-
----
-
-## 9) Luồng hoạt động
-
-```text
-Mic -> ESP32 -> WebSocket -> Server
-                           |
-                           v
-                      STT -> LLM -> TTS
-                           |
-                           v
-ESP32 <- audio stream <- Server
-        |
-        v
-       Loa
+  [Pin 18650 (3.7V)] 
+          │
+          ▼
+   [TP4056 (B+ / B-)] ── (Cổng sạc Type-C)
+          │
+      (OUT+ / OUT-)
+          │
+    [Công tắc ON/OFF]
+          │
+          ▼
+    [MT3608 VIN+ / VIN-]
+          │ (Chỉnh biến trở)
+          ▼
+    [MT3608 VOUT = 5.0V] ──┬── [Tụ hóa 1000µF 16V lọc nguồn]
+                           ├── ESP32 VIN
+                           └── MAX98357A VIN (5V)
 ```
 
 ---
 
-## 10) Định dạng audio
+## 3. Sơ Đồ Đấu Nối Chi Tiết Từng Module
 
-**ESP32 gửi lên server:**
-- PCM 16-bit
-- 16kHz
-- Mono
-
-**Server trả về:**
-- PCM 16kHz
-
----
-
-## 11) Test sau khi lắp
-
-**Serial monitor cần có:**
-- `[WiFi] Connected: ...`
-- `[WS] Connected`
-- `[I2S] Ready`
-- `[OLED] Found at 0x3C` hoặc `[OLED] Found at 0x3D`
-
-**OLED trạng thái:**
-- `CHO`
-- `NGHE`
-- `SUY NGHI`
-- `DANG NOI`
-
-**Test nhanh:**
-- Giữ nút để gửi mic.
-- Thả nút, server phản hồi.
-- Loa phát âm thanh trả về.
+### 3.1. Microphone INMP441 (I2S RX)
+| Chân INMP441 | Chân ESP32 | Ghi chú |
+|---|---|---|
+| **VDD** | **3.3V** | *Tuyệt đối không cắm 5V làm cháy mic* |
+| **GND** | **GND** | GND chung hệ thống |
+| **SD** | **GPIO 33** | Serial Data out |
+| **WS** | **GPIO 25** | Word Select (Clock bus dùng chung) |
+| **SCK** | **GPIO 26** | Serial Clock (Clock bus dùng chung) |
+| **L/R** | **GND** | Kênh Left (chọn kênh âm thanh Mono) |
 
 ---
 
-## 12) Checklist hoàn thiện
+### 3.2. Mạch Khuếch Đại MAX98357A & Loa (I2S TX)
+| Chân MAX98357A | Chân ESP32 / Nguồn | Ghi chú |
+|---|---|---|
+| **VIN** | **5V (từ MT3608)** | Cấp nguồn công suất cho loa |
+| **GND** | **GND** | GND chung hệ thống |
+| **DIN** | **GPIO 27** | Data in cho Amp |
+| **LRC** | **GPIO 25** | Word Select (Clock bus dùng chung với Mic) |
+| **BCLK** | **GPIO 26** | Bit Clock (Clock bus dùng chung với Mic) |
+| **GAIN** | *Để trống hoặc GND* | Mặc định +9dB |
+| **SD_MODE** | *Để trống* | Tự động kích hoạt |
 
-- [ ] OLED hiển thị đúng trạng thái
-- [ ] Mic gửi được dữ liệu
-- [ ] Loa phát được âm thanh
-- [ ] Không bị reset khi phát loa
-- [ ] Chạy ổn định 20-30 phút
+> [!NOTE]
+> `GPIO 25` (LRC/WS) và `GPIO 26` (BCLK/SCK) là 2 đường xung clock I2S dùng chung giữa Mic và Amp. Đây là thiết kế bus chuẩn trên vi điều khiển, giúp tiết kiệm chân GPIO và đồng bộ tần số lấy mẫu 16kHz.
 
 ---
 
-## Kết luận
+### 3.3. Màn Hình OLED SSD1306 (I2C)
+| Chân OLED | Chân ESP32 | Ghi chú |
+|---|---|---|
+| **VCC** | **3.3V** | Dùng nguồn 3.3V từ chân 3V3 của ESP32 |
+| **GND** | **GND** | GND chung hệ thống |
+| **SDA** | **GPIO 21** | I2C Data chuẩn ESP32 |
+| **SCL** | **GPIO 22** | I2C Clock chuẩn ESP32 |
 
-Nếu đi dây đúng theo sơ đồ nguồn, dùng chung GND và tránh trùng chân I2C/I2S, hệ thống ICD Voice trên ESP32 sẽ chạy ổn định và dễ mở rộng thêm tính năng.
+---
+
+### 3.4. Nút Nhấn Ghi Âm (Push Button)
+| Chân Nút Nhấn | Chân ESP32 | Ghi chú |
+|---|---|---|
+| Chân 1 | **GPIO 4** | Cấu hình `INPUT_PULLUP` nội trong code |
+| Chân 2 | **GND** | Khi nhấn, chân GPIO4 kéo về mức LOW |
+
+---
+
+## 4. Bảng Tổng Hợp Chân Kết Nối (Pinout Summary)
+
+| Thiết bị ngoại vi | Chân ESP32 | Giao tiếp | Điện áp hoạt động |
+|---|---|---|---|
+| **Mic WS** | `GPIO 25` | I2S Clock | 3.3V |
+| **Mic SCK** | `GPIO 26` | I2S Clock | 3.3V |
+| **Mic SD** | `GPIO 33` | I2S Data In | 3.3V |
+| **Amp LRC** | `GPIO 25` | I2S Clock | 5.0V |
+| **Amp BCLK** | `GPIO 26` | I2S Clock | 5.0V |
+| **Amp DIN** | `GPIO 27` | I2S Data Out | 5.0V |
+| **OLED SDA** | `GPIO 21` | I2C Data | 3.3V |
+| **OLED SCL** | `GPIO 22` | I2C Clock | 3.3V |
+| **Button** | `GPIO 4` | Digital Input | 3.3V (Pull-up) |
+
+---
+
+## 5. Quy Trình Kiểm Tra Sau Lắp Đặt
+
+1. **Kiểm tra nguội (chưa cấp điện):**
+   - Dùng đồng hồ đo thông mạch kiểm tra xem đường 5V và GND có bị chập không.
+   - Kiểm tra đường 3.3V và GND có bị chập không.
+
+2. **Cấp nguồn lần đầu:**
+   - Bật công tắc nguồn. Đo điện áp ngõ ra của MT3608 đảm bảo đạt **5.0V ± 0.1V**.
+   - Đo chân 3V3 của ESP32 đạt **3.3V**.
+
+3. **Nạp Firmware & Mở Serial Monitor (Baudrate 115200):**
+   - `[OLED] Initialized successfully (0x3C)`
+   - `[I2S] Hardware audio driver ready`
+   - `[WiFi] Connected! Assigned IP: 192.168.1.xxx`
+   - `[WS] Connected successfully!`
+   - `[SYSTEM] Ready! Press button to speak.`
+
+4. **Kiểm tra tương tác:**
+   - Nhấn nút: OLED hiển thị `DANG NGHE`, Serial hiển thị thanh level âm lượng micro.
+   - Thả nút: Server nhận diện giọng nói (STT), hiển thị transcript và câu trả lời.
+   - Loa phát âm thanh câu trả lời từ trợ lý ảo AI qua mạch MAX98357A mà không bị khởi động lại thiết bị (nhờ tụ lọc nguồn).

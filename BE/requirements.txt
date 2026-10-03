@@ -1,9 +1,20 @@
-fastapi
-uvicorn[standard]
-python-dotenv
-requests
-numpy
-httpx
+# Core Web Framework & WebSocket Gateway
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+websockets>=11.0.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# HTTP & Async Networking
+httpx>=0.24.0
+requests>=2.31.0
+
+# Numerical & Signal Processing
+numpy>=1.24.0
+
+# AI Speech Recognition & Synthesis
 openai-whisper
-edge-tts
-sounddevice
+edge-tts>=6.1.0
+
+# Audio Playback & Host I/O (Optional)
+sounddevice>=0.4.6

@@ -1,93 +1,177 @@
-// ============================================================
-//  ICD VOICE ASSISTANT – ESP32
-//  Bấm nút → ghi 6 giây → gửi lên server
-// ============================================================
+// ============================================================================
+//  PROJECT: INTELLIGENT COMMUNICATION DEVICE (ICD) - VOICE ASSISTANT FIRMWARE
+//  Hardware: ESP32 DevKit V1 + INMP441 (Mic) + MAX98357A (Amp) + SSD1306 (OLED)
+//  Protocol: WebSocket Client streaming PCM 16-bit 16kHz Mono to Backend Gateway
+// ============================================================================
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ArduinoWebsockets.h>
 #include <ArduinoJson.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include "driver/i2s.h"
 
 using namespace websockets;
 
-// ─────────────────────────────────────────────
-//  CONFIGURATION
-// ─────────────────────────────────────────────
-const char* WIFI_SSID = "Huyen";
-const char* WIFI_PASS = "09101976";
-const char* WS_URL    = "ws://192.168.1.51:8000/ws/chat?type=esp32";
+// ────────────────────────────────────────────────────────────────────────────
+//  1. CONFIGURATION (Cấu hình WiFi & Máy chủ Backend)
+// ────────────────────────────────────────────────────────────────────────────
+// Thay đổi thông tin mạng WiFi và địa chỉ IP máy chủ Backend của bạn
+const char* WIFI_SSID = "YOUR_WIFI_SSID";
+const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
 
-// ─────────────────────────────────────────────
-//  PIN MAP
-// ─────────────────────────────────────────────
-#define PIN_BUTTON   4    // GPIO4 – tránh GPIO0 (nút BOOT, hay lỗi)
+// Địa chỉ WebSocket của Backend FastAPI (cùng mạng LAN với ESP32)
+// Thay 192.168.1.x bằng IP máy tính chạy backend:
+const char* WS_URL    = "ws://192.168.1.15:8000/ws/chat?type=esp32";
 
-#define I2S_WS       25
-#define I2S_SCK      26
-#define I2S_SD_MIC   33
+// ────────────────────────────────────────────────────────────────────────────
+//  2. PIN MAPPING (Sơ đồ chân chuẩn xác)
+// ────────────────────────────────────────────────────────────────────────────
+// Nút bấm kích hoạt ghi âm (nối qua GND, dùng PULLUP nội)
+#define PIN_BUTTON        4
 
-// ─────────────────────────────────────────────
-//  AUDIO SETTINGS
-// ─────────────────────────────────────────────
-#define SAMPLE_RATE   16000
-#define RECORD_SECS   6
-#define CHUNK_SAMPLES 512
-#define TOTAL_BYTES   (SAMPLE_RATE * 2 * RECORD_SECS)
-#define LEVEL_BAR_LEN 20
-#define PEAK_FULL     8000   // mức peak coi là "đầy" thanh
+// I2S Clock Bus dùng chung (Shared I2S Clock Bus)
+#define I2S_WS            25   // LRC / WS
+#define I2S_SCK           26   // BCLK / SCK
 
-// ─────────────────────────────────────────────
-//  STATE MACHINE
-// ─────────────────────────────────────────────
+// I2S Data Pins
+#define I2S_SD_MIC        33   // SD out của Microphone INMP441
+#define I2S_DIN_AMP       27   // DIN in của Loa MAX98357A
+
+// I2C OLED SSD1306 (128x64)
+#define OLED_SDA          21
+#define OLED_SCL          22
+#define SCREEN_WIDTH      128
+#define SCREEN_HEIGHT     64
+#define OLED_I2C_ADDR     0x3C
+
+// ────────────────────────────────────────────────────────────────────────────
+//  3. AUDIO & TIMING CONSTANTS
+// ────────────────────────────────────────────────────────────────────────────
+#define SAMPLE_RATE       16000
+#define RECORD_SECS       6
+#define CHUNK_SAMPLES     512
+#define TOTAL_BYTES       (SAMPLE_RATE * 2 * RECORD_SECS)
+#define LEVEL_BAR_LEN     16
+#define PEAK_MAX_LEVEL    8000
+
+// ────────────────────────────────────────────────────────────────────────────
+//  4. FINITE STATE MACHINE
+// ────────────────────────────────────────────────────────────────────────────
 enum DeviceState : uint8_t {
   STATE_CONNECTING,
   STATE_IDLE,
   STATE_RECORDING,
   STATE_SENDING,
   STATE_PROCESSING,
+  STATE_SPEAKING,
   STATE_ERROR
 };
 
 volatile DeviceState g_state = STATE_CONNECTING;
 
-// ─────────────────────────────────────────────
-//  GLOBALS
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+//  5. GLOBAL OBJECTS & DRIVERS
+// ────────────────────────────────────────────────────────────────────────────
 WebsocketsClient ws;
-bool               wsConnected   = false;
-uint32_t           lastReconnect = 0;
-bool               i2sReady        = false;
-uint32_t           lastBtnDbgMs    = 0;
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
+bool oledAvailable = false;
+bool wsConnected   = false;
+bool i2sInstalled  = false;
+uint32_t lastReconnectTime = 0;
+uint32_t lastHeartbeatTime = 0;
+
+// Button debounce helper
 static bool readButtonRaw() {
   return digitalRead(PIN_BUTTON) == LOW;
 }
 
-// Chống nhiễu nút bấm (~50ms)
 static bool readButtonDebounced() {
-  static bool stable = false;
+  static bool stableState = false;
   static bool lastReading = false;
   static uint32_t lastChangeMs = 0;
 
-  bool reading = readButtonRaw();
-  if (reading != lastReading) {
+  bool currentReading = readButtonRaw();
+  if (currentReading != lastReading) {
     lastChangeMs = millis();
-    lastReading = reading;
+    lastReading = currentReading;
   }
-  if (millis() - lastChangeMs >= 50) {
-    stable = reading;
+  if ((millis() - lastChangeMs) >= 50) {
+    stableState = currentReading;
   }
-  return stable;
+  return stableState;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+//  6. OLED DISPLAY FUNCTIONS
+// ────────────────────────────────────────────────────────────────────────────
+static void initOLED() {
+  Wire.begin(OLED_SDA, OLED_SCL);
+  if (display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR)) {
+    oledAvailable = true;
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(10, 20);
+    display.println("ICD VOICE ASSISTANT");
+    display.setCursor(10, 36);
+    display.println("Starting up...");
+    display.display();
+    Serial.println("[OLED] Initialized successfully (0x3C)");
+  } else {
+    oledAvailable = false;
+    Serial.println("[OLED] Display not detected (optional, proceeding without it)");
+  }
+}
+
+static void updateOLED(const char* title, const char* subtitle = "", int progressPercent = -1) {
+  if (!oledAvailable) return;
+
+  display.clearDisplay();
+  display.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_WHITE);
+
+  // Status Title
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(8, 8);
+  display.print("ICD-ESP32 ");
+  if (wsConnected) {
+    display.print("[ONLINE]");
+  } else {
+    display.print("[OFFLINE]");
+  }
+
+  // Main Action Header
+  display.setTextSize(2);
+  display.setCursor(8, 24);
+  display.println(title);
+
+  // Subtitle / Info
+  display.setTextSize(1);
+  display.setCursor(8, 46);
+  display.println(subtitle);
+
+  // Progress Bar if applicable
+  if (progressPercent >= 0) {
+    int barWidth = map(constrain(progressPercent, 0, 100), 0, 100, 0, SCREEN_WIDTH - 20);
+    display.drawRect(8, 56, SCREEN_WIDTH - 16, 5, SSD1306_WHITE);
+    display.fillRect(8, 56, barWidth, 5, SSD1306_WHITE);
+  }
+
+  display.display();
 }
 
 static const char* stateLabel(DeviceState s) {
   switch (s) {
     case STATE_CONNECTING:  return "CONNECTING";
-    case STATE_IDLE:        return "IDLE";
-    case STATE_RECORDING:   return "RECORDING";
+    case STATE_IDLE:        return "STANDBY";
+    case STATE_RECORDING:   return "LISTENING";
     case STATE_SENDING:     return "SENDING";
-    case STATE_PROCESSING:  return "PROCESSING";
+    case STATE_PROCESSING:  return "THINKING";
+    case STATE_SPEAKING:    return "SPEAKING";
     case STATE_ERROR:       return "ERROR";
     default:                return "UNKNOWN";
   }
@@ -96,50 +180,87 @@ static const char* stateLabel(DeviceState s) {
 static void setState(DeviceState s) {
   if (g_state != s) {
     g_state = s;
-    Serial.printf("[STATE] %s\n", stateLabel(s));
+    Serial.printf("[STATE] -> %s\n", stateLabel(s));
+
+    switch (s) {
+      case STATE_CONNECTING:
+        updateOLED("KET NOI", "Dang tim server...");
+        break;
+      case STATE_IDLE:
+        updateOLED("SAN SANG", "Bam nut de noi");
+        break;
+      case STATE_RECORDING:
+        updateOLED("DANG NGHE", "Noi vao micro...", 0);
+        break;
+      case STATE_SENDING:
+        updateOLED("DANG GUI", "Truyen audio...");
+        break;
+      case STATE_PROCESSING:
+        updateOLED("SUY NGHI", "AI dang xu ly...");
+        break;
+      case STATE_SPEAKING:
+        updateOLED("DANG NOI", "Phat loa...");
+        break;
+      case STATE_ERROR:
+        updateOLED("LOI", "Kiem tra mang/server");
+        break;
+    }
   }
 }
 
-// ─────────────────────────────────────────────
-//  I2S – INMP441 (32-bit frame → PCM16)
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+//  7. I2S DUPLEX DRIVER (Micro INMP441 RX + Amp MAX98357A TX)
+// ────────────────────────────────────────────────────────────────────────────
 static void initI2S() {
+  if (i2sInstalled) return;
+
+  // Duplex Mode: RX for Microphone, TX for Speaker with shared BCLK/WS
   i2s_config_t cfg = {
-    .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+    .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX),
     .sample_rate          = SAMPLE_RATE,
-    .bits_per_sample      = I2S_BITS_PER_SAMPLE_32BIT,
+    .bits_per_sample      = I2S_BITS_PER_SAMPLE_32BIT, // INMP441 outputs 32-bit slot
     .channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
     .dma_buf_count        = 8,
     .dma_buf_len          = 256,
     .use_apll             = false,
-    .tx_desc_auto_clear   = false,
+    .tx_desc_auto_clear   = true,
     .fixed_mclk           = 0
   };
+
   i2s_pin_config_t pins = {
     .bck_io_num   = I2S_SCK,
     .ws_io_num    = I2S_WS,
-    .data_out_num = I2S_PIN_NO_CHANGE,
+    .data_out_num = I2S_DIN_AMP,
     .data_in_num  = I2S_SD_MIC
   };
-  ESP_ERROR_CHECK(i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL));
-  ESP_ERROR_CHECK(i2s_set_pin(I2S_NUM_0, &pins));
-}
 
-static void ensureI2S() {
-  if (i2sReady) return;
-  initI2S();
-  int32_t junk[256];
-  size_t got = 0;
-  for (int i = 0; i < 6; i++) {
-    i2s_read(I2S_NUM_0, junk, sizeof(junk), &got, 100 / portTICK_PERIOD_MS);
+  esp_err_t err = i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
+  if (err != ESP_OK) {
+    Serial.printf("[I2S] Driver install error: %d\n", err);
+    return;
   }
-  i2sReady = true;
-  Serial.println("[MIC] Ready");
+
+  err = i2s_set_pin(I2S_NUM_0, &pins);
+  if (err != ESP_OK) {
+    Serial.printf("[I2S] Set pin error: %d\n", err);
+    return;
+  }
+
+  // Flush initial microphone noise
+  int32_t flushBuffer[256];
+  size_t bytesRead = 0;
+  for (int i = 0; i < 6; i++) {
+    i2s_read(I2S_NUM_0, flushBuffer, sizeof(flushBuffer), &bytesRead, 50 / portTICK_PERIOD_MS);
+  }
+
+  i2sInstalled = true;
+  Serial.println("[I2S] Hardware audio driver ready (Duplex: RX Mic + TX Amp)");
 }
 
-static size_t readMicChunk(int16_t* out, size_t maxSamples, int16_t* outPeak, int32_t* outRms) {
+// Read PCM samples from INMP441, convert 32-bit slot to 16-bit PCM Mono
+static size_t readMicChunk(int16_t* out, size_t maxSamples, int16_t* outPeak) {
   int32_t raw32[CHUNK_SAMPLES];
   size_t batch = min(maxSamples, (size_t)CHUNK_SAMPLES);
   size_t bytesRead = 0;
@@ -148,225 +269,230 @@ static size_t readMicChunk(int16_t* out, size_t maxSamples, int16_t* outPeak, in
   size_t samplesRead = bytesRead / sizeof(int32_t);
 
   int16_t peak = 0;
-  int64_t sumAbs = 0;
-
   for (size_t i = 0; i < samplesRead; i++) {
-    int32_t s = raw32[i] >> 14;
-    if (s > 32767)  s = 32767;
-    if (s < -32768) s = -32768;
-    out[i] = (int16_t)s;
+    // INMP441 puts 24-bit audio in top bits; shift right 14 bits for clean 16-bit audio
+    int32_t sample = raw32[i] >> 14;
+    if (sample > 32767)  sample = 32767;
+    if (sample < -32768) sample = -32768;
+    out[i] = (int16_t)sample;
 
-    int16_t a = (int16_t)abs((int)s);
-    if (a > peak) peak = a;
-    sumAbs += a;
+    int16_t absSample = (int16_t)abs((int)sample);
+    if (absSample > peak) peak = absSample;
   }
 
   if (outPeak) *outPeak = peak;
-  if (outRms)  *outRms  = samplesRead ? (int32_t)(sumAbs / samplesRead) : 0;
-
   return samplesRead * sizeof(int16_t);
 }
 
-static void printLevelBar(uint8_t pct, int16_t peak, int32_t rms) {
-  uint8_t filled = map(constrain(peak, 0, PEAK_FULL), 0, PEAK_FULL, 0, LEVEL_BAR_LEN);
-
-  Serial.printf("[REC %3u%%] [", pct);
-  for (uint8_t i = 0; i < LEVEL_BAR_LEN; i++) {
-    Serial.print(i < filled ? '|' : ' ');
-  }
-  Serial.printf("] peak=%5d avg=%4ld\n", peak, (long)rms);
-}
-
-// ─────────────────────────────────────────────
-//  WiFi
-// ─────────────────────────────────────────────
-static void connectWiFi() {
-  Serial.printf("[WiFi] Connecting to %s\n", WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  setState(STATE_CONNECTING);
-
-  uint32_t t = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(100);
-    if (millis() - t > 15000) {
-      Serial.println("[WiFi] Timeout – restarting");
-      ESP.restart();
-    }
-  }
-  Serial.printf("[WiFi] IP: %s\n", WiFi.localIP().toString().c_str());
-}
-
-// ─────────────────────────────────────────────
-//  WebSocket
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+//  8. WEBSOCKET EVENT HANDLING
+// ────────────────────────────────────────────────────────────────────────────
 static void onWsMessage(WebsocketsMessage msg) {
-  if (msg.isBinary()) return;
+  // Binary audio frame from server (TTS speech to play on Speaker)
+  if (msg.isBinary()) {
+    setState(STATE_SPEAKING);
+    size_t bytesWritten = 0;
+    const char* rawBytes = msg.c_str();
+    size_t length = msg.length();
+    
+    // Play raw PCM chunk through I2S MAX98357A
+    i2s_write(I2S_NUM_0, rawBytes, length, &bytesWritten, portMAX_DELAY);
+    return;
+  }
 
-  StaticJsonDocument<256> doc;
-  if (deserializeJson(doc, msg.data())) return;
+  // JSON Control frame
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, msg.data());
+  if (err) return;
 
   const char* event = doc["event"] | "";
   Serial.printf("[WS] Event: %s\n", event);
 
-  if      (strcmp(event, "processing")     == 0) setState(STATE_PROCESSING);
-  else if (strcmp(event, "transcript")     == 0) Serial.printf("[STT] %s\n", doc["text"] | "");
-  else if (strcmp(event, "assistant_text") == 0) Serial.printf("[AI] %s\n", doc["text"] | "");
-  else if (strcmp(event, "tts_start")      == 0) setState(STATE_PROCESSING);
-  else if (strcmp(event, "tts_end")        == 0) setState(STATE_IDLE);
-  else if (strcmp(event, "stt_empty")      == 0) setState(STATE_IDLE);
-  else if (strcmp(event, "error")          == 0) {
-    Serial.printf("[WS] Error: %s\n", doc["message"] | "");
+  if (strcmp(event, "processing") == 0) {
+    setState(STATE_PROCESSING);
+  } else if (strcmp(event, "transcript") == 0) {
+    const char* text = doc["text"] | "";
+    Serial.printf("[STT] \"%s\"\n", text);
+    if (oledAvailable) updateOLED("STT", text);
+  } else if (strcmp(event, "assistant_text") == 0) {
+    const char* text = doc["text"] | "";
+    Serial.printf("[AI] \"%s\"\n", text);
+    if (oledAvailable) updateOLED("TRA LOI", text);
+  } else if (strcmp(event, "tts_start") == 0) {
+    setState(STATE_SPEAKING);
+  } else if (strcmp(event, "tts_end") == 0) {
+    setState(STATE_IDLE);
+  } else if (strcmp(event, "stt_empty") == 0) {
+    Serial.println("[STT] Empty / No speech detected");
+    setState(STATE_IDLE);
+  } else if (strcmp(event, "error") == 0) {
+    Serial.printf("[SERVER ERROR] %s\n", doc["message"] | "");
+    setState(STATE_ERROR);
+    delay(1500);
     setState(STATE_IDLE);
   }
 }
 
 static bool connectWS() {
-  Serial.printf("[WS] Connecting to %s\n", WS_URL);
+  Serial.printf("[WS] Connecting to %s ...\n", WS_URL);
   ws.onMessage(onWsMessage);
   ws.onEvent([](WebsocketsEvent ev, String) {
     if (ev == WebsocketsEvent::ConnectionClosed) {
       wsConnected = false;
-      Serial.println("[WS] Connection closed by server");
+      Serial.println("[WS] Disconnected from server");
+      setState(STATE_CONNECTING);
     }
   });
+
   if (ws.connect(WS_URL)) {
-    Serial.println("[WS] Connected");
+    Serial.println("[WS] Connected successfully!");
     wsConnected = true;
     setState(STATE_IDLE);
     return true;
   }
-  Serial.println("[WS] Failed");
+
+  Serial.println("[WS] Connection failed");
   wsConnected = false;
   setState(STATE_ERROR);
   return false;
 }
 
-static void pollWebSocket() {
-  if (!wsConnected) return;
-  ws.poll();
+// ────────────────────────────────────────────────────────────────────────────
+//  9. WIFI INITIALIZATION & MANAGEMENT
+// ────────────────────────────────────────────────────────────────────────────
+static void connectWiFi() {
+  Serial.printf("[WiFi] Connecting to SSID: %s\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  setState(STATE_CONNECTING);
+
+  uint32_t startMs = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(200);
+    Serial.print(".");
+    if (millis() - startMs > 15000) {
+      Serial.println("\n[WiFi] Connection timeout. Restarting...");
+      ESP.restart();
+    }
+  }
+
+  Serial.println("\n[WiFi] Connected!");
+  Serial.printf("[WiFi] Assigned IP: %s\n", WiFi.localIP().toString().c_str());
+  if (oledAvailable) {
+    char ipBuf[32];
+    snprintf(ipBuf, sizeof(ipBuf), "IP: %s", WiFi.localIP().toString().c_str());
+    updateOLED("WIFI OK", ipBuf);
+  }
 }
 
-// ─────────────────────────────────────────────
-//  Bấm nút → ghi 6s → gửi (stream, không cần RAM lớn)
-// ─────────────────────────────────────────────
-static void recordAndSend() {
-  Serial.println("[BTN] >>> Da nhan nut – bat dau ghi am!");
-  Serial.flush();
+// ────────────────────────────────────────────────────────────────────────────
+//  10. AUDIO RECORDING & STREAMING
+// ────────────────────────────────────────────────────────────────────────────
+static void recordAndSendVoice() {
+  Serial.println("[REC] Button pressed! Recording voice stream...");
+  initI2S();
 
-  ensureI2S();
-
+  // Reset backend buffer
   ws.send("{\"event\":\"reset\"}");
   ws.poll();
 
   setState(STATE_RECORDING);
-  Serial.printf("[REC] Ghi am %d giay – noi vao mic!\n", RECORD_SECS);
-  Serial.println("[REC] Thanh | = am luong (peak), cang dai = cang to");
 
-  int16_t chunk[CHUNK_SAMPLES];
-  size_t sent = 0;
-  uint32_t lastLevelMs = 0;
-  int16_t sessionPeak = 0;
+  int16_t chunkBuffer[CHUNK_SAMPLES];
+  size_t totalBytesSent = 0;
+  uint32_t lastDisplayUpdateMs = 0;
 
-  while (sent < TOTAL_BYTES) {
+  while (totalBytesSent < TOTAL_BYTES) {
     int16_t peak = 0;
-    int32_t rms = 0;
-    size_t got = readMicChunk(chunk, CHUNK_SAMPLES, &peak, &rms);
-    if (got > 0) {
-      size_t toSend = min(got, TOTAL_BYTES - sent);
-      ws.sendBinary((const char*)chunk, toSend);
-      sent += toSend;
+    size_t samplesGot = readMicChunk(chunkBuffer, CHUNK_SAMPLES, &peak);
 
-      if (peak > sessionPeak) sessionPeak = peak;
+    if (samplesGot > 0) {
+      size_t bytesToSend = min(samplesGot, (size_t)(TOTAL_BYTES - totalBytesSent));
+      ws.sendBinary((const char*)chunkBuffer, bytesToSend);
+      totalBytesSent += bytesToSend;
 
+      // Update OLED progress & level bar
       uint32_t now = millis();
-      if (now - lastLevelMs >= 150) {
-        lastLevelMs = now;
-        uint8_t pct = (uint8_t)((sent * 100UL) / TOTAL_BYTES);
-        printLevelBar(pct, peak, rms);
+      if (now - lastDisplayUpdateMs >= 150) {
+        lastDisplayUpdateMs = now;
+        int percent = (int)((totalBytesSent * 100UL) / TOTAL_BYTES);
+        updateOLED("DANG NGHE", "Noi vao micro...", percent);
       }
     }
     ws.poll();
   }
 
-  Serial.printf("[REC] Xong – peak max=%d\n", sessionPeak);
-
+  Serial.printf("[REC] Finished recording %u bytes. Finalizing...\n", totalBytesSent);
   setState(STATE_SENDING);
+
+  // Send end-of-audio frame
   ws.send("{\"event\":\"end\"}");
   ws.poll();
-  Serial.printf("[SEND] Da gui %u bytes – cho server xu ly\n", sent);
+
   setState(STATE_PROCESSING);
 }
 
-// ─────────────────────────────────────────────
-//  SETUP
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+//  11. SETUP
+// ────────────────────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("\n[BOOT] ICD Voice – Mic only");
+  delay(500);
+  Serial.println("\n==========================================");
+  Serial.println("  ICD VOICE ASSISTANT - ESP32 FIRMWARE    ");
+  Serial.println("==========================================");
 
   pinMode(PIN_BUTTON, INPUT_PULLUP);
-  Serial.printf("[BTN] GPIO%d – bam 1 lan de ghi %d giay\n", PIN_BUTTON, RECORD_SECS);
-  Serial.printf("[BTN] Trang thai GPIO%d hien tai: %s\n",
-                PIN_BUTTON, readButtonRaw() ? "LOW (dang nhan)" : "HIGH (chua nhan)");
-  Serial.printf("[BTN] Day noi: GPIO%d -- nut -- GND\n", PIN_BUTTON);
-  Serial.printf("[MEM] Free heap: %u KB\n", ESP.getFreeHeap() / 1024);
+  Serial.printf("[BTN] Push Button on GPIO %d (Active LOW)\n", PIN_BUTTON);
 
+  initOLED();
+  initI2S();
   connectWiFi();
   connectWS();
 
-  Serial.println("[READY] Bam nut de bat dau ghi am");
+  Serial.println("[SYSTEM] Ready! Press button to speak.");
 }
 
-// ─────────────────────────────────────────────
-//  LOOP
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+//  12. MAIN LOOP
+// ────────────────────────────────────────────────────────────────────────────
 void loop() {
-  pollWebSocket();
+  if (wsConnected) {
+    ws.poll();
+  }
 
-  if (!wsConnected) {
+  // Auto-reconnect WebSocket if disconnected
+  if (!wsConnected && WiFi.status() == WL_CONNECTED) {
     uint32_t now = millis();
-    if (now - lastReconnect > 5000) {
-      lastReconnect = now;
-      Serial.println("[WS] Reconnecting...");
+    if (now - lastReconnectTime > 5000) {
+      lastReconnectTime = now;
+      Serial.println("[WS] Attempting to reconnect...");
       ws.close();
       connectWS();
     }
   }
 
-  if (g_state == STATE_ERROR && wsConnected) {
-    setState(STATE_IDLE);
+  // Ping server heartbeat every 15 seconds
+  if (wsConnected && (millis() - lastHeartbeatTime > 15000)) {
+    lastHeartbeatTime = millis();
+    ws.send("{\"event\":\"ping\"}");
   }
 
+  // Handle Button Press
   static bool prevPressed = false;
-  bool pressed = readButtonDebounced();
+  bool isPressed = readButtonDebounced();
 
-  // In trang thai nut moi 2 giay khi IDLE
-  if (g_state == STATE_IDLE && millis() - lastBtnDbgMs > 2000) {
-    lastBtnDbgMs = millis();
-    Serial.printf("[BTN] GPIO%d=%s | state=IDLE | ws=%s\n",
-                  PIN_BUTTON,
-                  readButtonRaw() ? "LOW" : "HIGH",
-                  wsConnected ? "OK" : "NO");
-  }
-
-  // Bat moi lan nhan / tha nut
-  if (pressed != prevPressed) {
-    Serial.printf("[BTN] %s\n", pressed ? "NUT NHAN (LOW)" : "NUT THA (HIGH)");
-    Serial.flush();
-  }
-
-  if (pressed && !prevPressed) {
+  if (isPressed && !prevPressed) {
     if (!wsConnected) {
-      Serial.println("[BTN] Chua ket noi server");
-    } else if (g_state != STATE_IDLE) {
-      Serial.printf("[BTN] Dang %s – vui long doi\n", stateLabel(g_state));
+      Serial.println("[BTN] Cannot record: Server offline.");
+      if (oledAvailable) updateOLED("MAT KET NOI", "Chua noi server");
+    } else if (g_state == STATE_IDLE) {
+      recordAndSendVoice();
     } else {
-      recordAndSend();
-      delay(300);
+      Serial.printf("[BTN] Device busy (%s), please wait.\n", stateLabel(g_state));
     }
   }
 
-  prevPressed = pressed;
+  prevPressed = isPressed;
   delay(10);
 }

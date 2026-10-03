@@ -1,12 +1,81 @@
-
-# Chặn thư mục môi trường ảo Python
-BE/venv/
+# ==========================================
+# Python & Virtual Environments
+# ==========================================
 venv/
 .venv/
+env/
+BE/venv/
+*/venv/
+*/.venv/
 
-# Chặn các file cấu hình môi trường bảo mật
+# ==========================================
+# Environment Variables & Secrets
+# ==========================================
 .env
+.env.*
+!.env.example
+*.env
 
-# Chặn các file cache của Python
+# ==========================================
+# Database Files & History
+# ==========================================
+*.db
+*.sqlite
+*.sqlite3
+chat_history.db
+chat_history_test.db
+*/chat_history.db
+*/chat_history_test.db
+
+# ==========================================
+# Python Caches & Compiled Bytecode
+# ==========================================
 __pycache__/
-*.pyc
+*/__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ==========================================
+# Test Directories & Test Scripts
+# ==========================================
+BE_test/
+BE_test/**
+*test*/
+*/OLED_TEST/
+OLED_TEST/
+
+# ==========================================
+# Temporary Audio & Media Files
+# ==========================================
+*.wav
+*.mp3
+*.pcm
+temp/
+tmp/
+scratch/
+
+# ==========================================
+# IDEs & OS Files
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# Arduino & PlatformIO Builds
+# ==========================================
+.pio/
+.pioenvs/
+.piolibdeps/
+build/
+*.bin
+*.hex
+*.elf

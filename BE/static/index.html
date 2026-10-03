@@ -1,372 +1,759 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="vi">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>ICD Dashboard — ESP32 ↔ Server</title>
-    <style>
-      :root {
-        --esp: #2563eb;
-        --srv: #059669;
-        --back: #7c3aed;
-        --err: #dc2626;
-        --bg: #f0f4f8;
-        --card: #fff;
-      }
-      * { box-sizing: border-box; }
-      body {
-        font-family: "Segoe UI", Inter, Arial, sans-serif;
-        margin: 0;
-        padding: 20px;
-        background: var(--bg);
-        color: #1e293b;
-      }
-      h1 { margin: 0 0 4px; font-size: 1.5rem; }
-      .subtitle { color: #64748b; margin-bottom: 16px; font-size: 0.9rem; }
-      .grid {
-        display: grid;
-        grid-template-columns: 280px 1fr;
-        gap: 16px;
-        align-items: start;
-      }
-      @media (max-width: 800px) {
-        .grid { grid-template-columns: 1fr; }
-      }
-      .card {
-        background: var(--card);
-        border-radius: 10px;
-        padding: 14px;
-        box-shadow: 0 1px 4px rgba(0,0,0,.08);
-      }
-      .card h3 { margin: 0 0 10px; font-size: 0.95rem; color: #475569; }
-      .device {
-        padding: 8px 10px;
-        border-left: 3px solid var(--esp);
-        background: #eff6ff;
-        border-radius: 4px;
-        margin-bottom: 8px;
-        font-size: 0.85rem;
-      }
-      .device-id { font-family: monospace; font-weight: 600; }
-      .device-status { color: #64748b; font-size: 0.78rem; margin-top: 2px; }
-      .flow-diagram {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        padding: 12px;
-        background: #f8fafc;
-        border-radius: 8px;
-        margin-bottom: 12px;
-        font-size: 0.85rem;
-      }
-      .node {
-        padding: 8px 14px;
-        border-radius: 8px;
-        font-weight: 600;
-        text-align: center;
-      }
-      .node-esp { background: #dbeafe; color: var(--esp); border: 2px solid var(--esp); }
-      .node-srv { background: #d1fae5; color: var(--srv); border: 2px solid var(--srv); }
-      .arrow { color: #94a3b8; font-size: 1.2rem; }
-      .state-badge {
-        display: inline-block;
-        padding: 3px 8px;
-        border-radius: 99px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        background: #fef3c7;
-        color: #92400e;
-      }
-      #timeline {
-        max-height: 340px;
-        overflow-y: auto;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 8px;
-        background: #fafafa;
-      }
-      .tl-item {
-        display: flex;
-        gap: 8px;
-        padding: 6px 8px;
-        border-radius: 6px;
-        margin-bottom: 4px;
-        font-size: 0.82rem;
-        line-height: 1.4;
-        animation: fadeIn .25s ease;
-      }
-      @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-      .tl-item.esp { background: #eff6ff; border-left: 3px solid var(--esp); }
-      .tl-item.srv { background: #ecfdf5; border-left: 3px solid var(--srv); }
-      .tl-item.back { background: #f5f3ff; border-left: 3px solid var(--back); }
-      .tl-item.err { background: #fef2f2; border-left: 3px solid var(--err); }
-      .tl-time { color: #94a3b8; font-family: monospace; white-space: nowrap; min-width: 68px; }
-      .tl-dir { font-weight: 700; white-space: nowrap; min-width: 110px; }
-      .tl-step { font-weight: 600; min-width: 100px; }
-      .tl-detail { color: #475569; word-break: break-word; }
-      .result-box {
-        margin-top: 12px;
-        padding: 10px;
-        background: #f8fafc;
-        border-radius: 8px;
-        border: 1px solid #e2e8f0;
-      }
-      .result-box label {
-        display: block;
-        font-size: 0.75rem;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: .04em;
-        margin-bottom: 4px;
-      }
-      .result-box p { margin: 0 0 10px; font-size: 0.95rem; }
-      audio { width: 100%; margin-top: 4px; }
-      .controls { display: flex; gap: 8px; margin-top: 10px; }
-      button {
-        padding: 7px 12px;
-        border-radius: 6px;
-        border: 1px solid #cbd5e1;
-        background: #fff;
-        cursor: pointer;
-        font-size: 0.85rem;
-      }
-      button:hover { background: #f1f5f9; }
-      .conn-dot {
-        display: inline-block;
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: #22c55e;
-        margin-right: 6px;
-        animation: pulse 2s infinite;
-      }
-      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
-      .conn-dot.off { background: #ef4444; animation: none; }
-    </style>
-  </head>
-  <body>
-    <h1>ICD Voice Dashboard</h1>
-    <p class="subtitle">
-      <span class="conn-dot" id="connDot"></span>
-      <span id="connLabel">Đang kết nối...</span>
-      — Theo dõi tương tác ESP32 ↔ Server theo thời gian thực
-    </p>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICD Voice Assistant — Real-Time IoT Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0a0e17;
+      --bg-secondary: #121826;
+      --bg-card: rgba(22, 30, 46, 0.7);
+      --bg-card-hover: rgba(28, 39, 60, 0.85);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(59, 130, 246, 0.3);
+      
+      --accent-blue: #3b82f6;
+      --accent-cyan: #06b6d4;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+      --accent-purple: #8b5cf6;
 
-    <div class="grid">
-      <div class="card">
-        <h3>Thiết bị ESP32</h3>
-        <div id="devices"><div class="device-status">Chưa có thiết bị</div></div>
-        <div class="controls">
-          <button id="refreshBtn">Refresh</button>
-          <button id="clearBtn">Xóa log</button>
-        </div>
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+      background: radial-gradient(circle at top right, #131b2e 0%, #0a0e17 100%);
+      color: var(--text-main);
+      min-height: 100vh;
+      padding: 24px 32px;
+      line-height: 1.5;
+    }
+
+    /* Top Navigation */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border-color);
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 24px rgba(59, 130, 246, 0.3);
+    }
+
+    .brand-icon svg {
+      width: 24px;
+      height: 24px;
+      fill: #fff;
+    }
+
+    .brand h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .brand p {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .status-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-color);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-emerald);
+      box-shadow: 0 0 10px var(--accent-emerald);
+      animation: pulse 2s infinite;
+    }
+
+    .dot.offline {
+      background: var(--accent-rose);
+      box-shadow: 0 0 10px var(--accent-rose);
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.1); }
+    }
+
+    /* Layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    @media (max-width: 960px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Card Panels */
+    .panel {
+      background: var(--bg-card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+      transition: border-color 0.2s ease;
+    }
+
+    .panel:hover {
+      border-color: var(--border-accent);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .panel-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    /* Device Card */
+    .device-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .device-card {
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-color);
+      border-left: 4px solid var(--accent-blue);
+      border-radius: var(--radius-md);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .device-info h4 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+
+    .device-info p {
+      font-size: 0.75rem;
+      color: var(--accent-emerald);
+      font-weight: 500;
+    }
+
+    /* Hardware Specs Mini Table */
+    .spec-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      margin-top: 14px;
+      color: var(--text-muted);
+    }
+
+    .spec-table td {
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .spec-table td:last-child {
+      text-align: right;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-main);
+    }
+
+    /* Pipeline Step Tracker */
+    .flow-bar {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 12px 16px;
+      border-radius: var(--radius-md);
+      margin-bottom: 20px;
+      border: 1px solid var(--border-color);
+    }
+
+    .flow-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      font-weight: 600;
+      transition: all 0.2s ease;
+      flex: 1;
+      text-align: center;
+    }
+
+    .flow-step .step-circle {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 6px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .flow-step.active {
+      color: var(--accent-cyan);
+    }
+
+    .flow-step.active .step-circle {
+      background: rgba(6, 182, 212, 0.15);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+      box-shadow: 0 0 12px rgba(6, 182, 212, 0.4);
+    }
+
+    /* Real-Time Timeline */
+    .timeline-container {
+      max-height: 380px;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      scroll-behavior: smooth;
+    }
+
+    .timeline-container::-webkit-scrollbar {
+      width: 6px;
+    }
+    .timeline-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 3px;
+    }
+
+    .tl-entry {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 0.82rem;
+      background: rgba(255, 255, 255, 0.02);
+      border-left: 3px solid var(--border-color);
+      animation: slideIn 0.2s ease forwards;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .tl-entry.esp { border-left-color: var(--accent-blue); background: rgba(59, 130, 246, 0.04); }
+    .tl-entry.srv { border-left-color: var(--accent-cyan); background: rgba(6, 182, 212, 0.04); }
+    .tl-entry.tts { border-left-color: var(--accent-purple); background: rgba(139, 92, 246, 0.04); }
+    .tl-entry.err { border-left-color: var(--accent-rose); background: rgba(244, 63, 94, 0.08); }
+
+    .tl-time {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-dim);
+      font-size: 0.74rem;
+      white-space: nowrap;
+      margin-top: 1px;
+    }
+
+    .tl-tag {
+      font-weight: 700;
+      font-size: 0.72rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      white-space: nowrap;
+    }
+
+    .tl-msg {
+      flex: 1;
+      color: var(--text-main);
+      word-break: break-word;
+    }
+
+    /* Results Showcase */
+    .result-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 768px) {
+      .result-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .result-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 16px;
+    }
+
+    .result-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .result-content {
+      font-size: 0.95rem;
+      color: #fff;
+      min-height: 48px;
+    }
+
+    /* Audio Player */
+    audio {
+      width: 100%;
+      height: 38px;
+      margin-top: 12px;
+      border-radius: var(--radius-sm);
+      filter: invert(0.85) hue-rotate(180deg);
+    }
+
+    /* Web Test Console */
+    .test-box {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .test-input {
+      flex: 1;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 10px 16px;
+      color: #fff;
+      font-size: 0.88rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .test-input:focus {
+      border-color: var(--accent-blue);
+    }
+
+    .btn {
+      padding: 10px 18px;
+      border-radius: var(--radius-md);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-blue), #2563eb);
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(37, 99, 235, 0.4);
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+    }
+
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zm5.3 7a.7.7 0 0 0-.7.7A4.6 4.6 0 0 1 12 14.3a4.6 4.6 0 0 1-4.6-4.6.7.7 0 1 0-1.4 0A6 6 0 0 0 11.3 15.6V19H9a.7.7 0 1 0 0 1.4h6a.7.7 0 1 0 0-1.4h-2.3v-3.4a6 6 0 0 0 5.3-5.9.7.7 0 0 0-.7-.7z"/></svg>
       </div>
-
-      <div class="card">
-        <div class="flow-diagram">
-          <div class="node node-esp">ESP32<br><small>Mic + Nút</small></div>
-          <div class="arrow">⇄ WebSocket</div>
-          <div class="node node-srv">Server<br><small>STT → LLM → TTS</small></div>
-        </div>
-
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-          <h3 style="margin:0;flex:1">Timeline tương tác</h3>
-          <span class="state-badge" id="stateBadge">Chờ ESP32</span>
-        </div>
-        <div id="timeline"></div>
-
-        <div class="result-box">
-          <label>Bạn nói (STT)</label>
-          <p id="lastTranscript">—</p>
-          <label>Trợ lý trả lời</label>
-          <p id="lastAnswer">—</p>
-          <audio id="ttsPlayer" controls></audio>
-        </div>
+      <div>
+        <h1>ICD Voice Dashboard</h1>
+        <p>Intelligent Communication Device • ESP32 ↔ Server IoT Platform</p>
       </div>
     </div>
 
-    <script>
-      const devicesDiv = document.getElementById("devices");
-      const timeline = document.getElementById("timeline");
-      const lastTranscript = document.getElementById("lastTranscript");
-      const lastAnswer = document.getElementById("lastAnswer");
-      const ttsPlayer = document.getElementById("ttsPlayer");
-      const stateBadge = document.getElementById("stateBadge");
-      const connDot = document.getElementById("connDot");
-      const connLabel = document.getElementById("connLabel");
+    <div class="status-group">
+      <div class="badge-pill">
+        <div class="dot" id="wsDot"></div>
+        <span id="wsStatus">Connecting...</span>
+      </div>
+      <button class="btn btn-outline" id="clearLogBtn">Clear Logs</button>
+    </div>
+  </header>
 
-      let deviceList = [];
-      let incomingAudioChunks = [];
-      let expectingTts = false;
-      let expectedTtsSize = 0;
+  <div class="dashboard-grid">
 
-      const STEP_LABELS = {
-        connected: "Kết nối",
-        disconnected: "Ngắt kết nối",
-        audio_chunk: "Nhận audio",
-        end_of_audio: "Hết ghi âm",
-        processing: "Đang xử lý",
-        pipeline_start: "Bắt đầu pipeline",
-        audio_ok: "Audio OK",
-        audio_error: "Lỗi audio",
-        stt_start: "STT bắt đầu",
-        stt_done: "STT xong",
-        stt_empty: "STT rỗng",
-        stt_error: "Lỗi STT",
-        llm_start: "LLM bắt đầu",
-        llm_done: "LLM xong",
-        llm_error: "Lỗi LLM",
-        tts_start: "TTS bắt đầu",
-        tts_done: "TTS xong",
-        tts_end: "Gửi TTS xong",
-        tts_error: "Lỗi TTS",
-        transcript: "Gửi transcript",
-        assistant_text: "Gửi câu trả lời",
-        playback_start: "Phát loa",
-        playback_done: "Phát xong",
-        playback_error: "Lỗi phát loa",
-        turn_complete: "Hoàn tất",
-        pong: "Pong",
-        buffer_reset: "Reset buffer",
-        warning: "Cảnh báo",
-        error: "Lỗi",
-        ws_error: "Lỗi WS",
+    <!-- LEFT COLUMN: HARDWARE & SYSTEM STATUS -->
+    <aside>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Connected Devices</span>
+          <span class="badge-pill" id="deviceCountBadge">0 Online</span>
+        </div>
+        <div class="device-list" id="deviceList">
+          <div style="font-size:0.82rem; color:var(--text-dim); text-align:center; padding:16px 0;">
+            No ESP32 devices connected yet.
+          </div>
+        </div>
+
+        <div class="panel-header" style="margin-top:20px;">
+          <span class="panel-title">Hardware Pinout</span>
+        </div>
+        <table class="spec-table">
+          <tr><td>Mic INMP441 (WS)</td><td>GPIO 25</td></tr>
+          <tr><td>Mic INMP441 (SCK)</td><td>GPIO 26</td></tr>
+          <tr><td>Mic INMP441 (SD)</td><td>GPIO 33</td></tr>
+          <tr><td>Amp MAX98357A (DIN)</td><td>GPIO 27</td></tr>
+          <tr><td>Amp Clock (LRC/BCLK)</td><td>GPIO 25/26</td></tr>
+          <tr><td>OLED SSD1306 (SDA/SCL)</td><td>GPIO 21/22</td></tr>
+          <tr><td>Push Button</td><td>GPIO 4</td></tr>
+        </table>
+      </div>
+    </aside>
+
+    <!-- RIGHT COLUMN: REAL-TIME PIPELINE & LOGS -->
+    <main>
+      <div class="panel">
+        <!-- Interactive Step Tracker -->
+        <div class="flow-bar">
+          <div class="flow-step active" id="stepIdle">
+            <div class="step-circle">1</div>
+            <span>Standby</span>
+          </div>
+          <div class="flow-step" id="stepRec">
+            <div class="step-circle">2</div>
+            <span>Recording</span>
+          </div>
+          <div class="flow-step" id="stepStt">
+            <div class="step-circle">3</div>
+            <span>Whisper STT</span>
+          </div>
+          <div class="flow-step" id="stepLlm">
+            <div class="step-circle">4</div>
+            <span>AI Reasoning</span>
+          </div>
+          <div class="flow-step" id="stepTts">
+            <div class="step-circle">5</div>
+            <span>Edge TTS</span>
+          </div>
+        </div>
+
+        <!-- Latest Turn Card -->
+        <div class="result-grid">
+          <div class="result-card">
+            <div class="result-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+              Recognized Speech (STT)
+            </div>
+            <div class="result-content" id="sttDisplay">Awaiting voice input from ESP32...</div>
+          </div>
+          <div class="result-card">
+            <div class="result-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              Assistant Response
+            </div>
+            <div class="result-content" id="llmDisplay">—</div>
+            <audio id="audioPlayer" controls style="display:none;"></audio>
+          </div>
+        </div>
+
+        <!-- Timeline Log -->
+        <div class="panel-header">
+          <span class="panel-title">Real-Time Interaction Feed</span>
+          <span style="font-size:0.75rem; color:var(--text-dim);" id="feedCount">0 events</span>
+        </div>
+        <div class="timeline-container" id="timelineContainer"></div>
+
+        <!-- Direct Test Console -->
+        <form class="test-box" id="testForm">
+          <input type="text" class="test-input" id="testInput" placeholder="Type a message to test AI model directly..." autocomplete="off">
+          <button type="submit" class="btn btn-primary">Send Test</button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const wsDot = document.getElementById("wsDot");
+    const wsStatus = document.getElementById("wsStatus");
+    const deviceList = document.getElementById("deviceList");
+    const deviceCountBadge = document.getElementById("deviceCountBadge");
+    const timeline = document.getElementById("timelineContainer");
+    const feedCount = document.getElementById("feedCount");
+    const sttDisplay = document.getElementById("sttDisplay");
+    const llmDisplay = document.getElementById("llmDisplay");
+    const audioPlayer = document.getElementById("audioPlayer");
+    const clearLogBtn = document.getElementById("clearLogBtn");
+    const testForm = document.getElementById("testForm");
+    const testInput = document.getElementById("testInput");
+
+    const steps = {
+      idle: document.getElementById("stepIdle"),
+      rec: document.getElementById("stepRec"),
+      stt: document.getElementById("stepStt"),
+      llm: document.getElementById("stepLlm"),
+      tts: document.getElementById("stepTts")
+    };
+
+    let logCounter = 0;
+    let ttsAudioChunks = [];
+    let expectedTtsSize = 0;
+
+    function setStep(activeKey) {
+      Object.keys(steps).forEach(k => {
+        steps[k].classList.toggle("active", k === activeKey);
+      });
+    }
+
+    function addLogEntry(direction, tag, message, extra = "") {
+      logCounter++;
+      feedCount.textContent = `${logCounter} events`;
+
+      const entry = document.createElement("div");
+      let cls = "srv";
+      if (direction === "esp32->server") cls = "esp";
+      else if (direction === "server->esp32") cls = "tts";
+      if (tag.toLowerCase().includes("error") || message.toLowerCase().includes("error")) cls = "err";
+
+      entry.className = `tl-entry ${cls}`;
+      const now = new Date().toLocaleTimeString();
+      entry.innerHTML = `
+        <span class="tl-time">${now}</span>
+        <span class="tl-tag">${tag}</span>
+        <span class="tl-msg">${message} ${extra ? `<span style="color:var(--text-dim)">(${extra})</span>` : ""}</span>
+      `;
+      timeline.appendChild(entry);
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+
+    function updateDevices(devices) {
+      deviceCountBadge.textContent = `${devices.length} Online`;
+      if (!devices.length) {
+        deviceList.innerHTML = `<div style="font-size:0.82rem; color:var(--text-dim); text-align:center; padding:16px 0;">No ESP32 devices connected yet.</div>`;
+        return;
+      }
+      deviceList.innerHTML = devices.map(d => `
+        <div class="device-card">
+          <div class="device-info">
+            <h4>${d.slice(0, 12)}...</h4>
+            <p>● Ready / Online</p>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    // Connect WebSocket
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${location.host}/ws/chat?type=browser`;
+    let socket;
+
+    function connectWs() {
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        wsDot.classList.remove("offline");
+        wsStatus.textContent = "Dashboard Online";
+        addLogEntry("server", "GATEWAY", "WebSocket connected successfully");
       };
 
-      function setState(text) {
-        stateBadge.textContent = text;
-      }
-
-      function addTimeline(direction, step, detail, sessionId) {
-        const item = document.createElement("div");
-        const isErr = step.includes("error") || step === "error";
-        let cls = "srv";
-        if (direction === "esp32->server") cls = "esp";
-        else if (direction === "server->esp32") cls = "back";
-        if (isErr) cls = "err";
-
-        item.className = `tl-item ${cls}`;
-        const sid = sessionId ? sessionId.slice(0, 8) : "";
-        item.innerHTML = `
-          <span class="tl-time">${new Date().toLocaleTimeString()}</span>
-          <span class="tl-dir">${direction === "esp32->server" ? "ESP→SRV" : direction === "server->esp32" ? "SRV→ESP" : "SERVER"}</span>
-          <span class="tl-step">${STEP_LABELS[step] || step}</span>
-          <span class="tl-detail">${detail || ""}${sid ? ` [${sid}]` : ""}</span>
-        `;
-        timeline.appendChild(item);
-        timeline.scrollTop = timeline.scrollHeight;
-      }
-
-      function renderDevices() {
-        devicesDiv.innerHTML = "";
-        if (!deviceList.length) {
-          devicesDiv.innerHTML = '<div class="device-status">Chưa có thiết bị kết nối</div>';
-          return;
-        }
-        deviceList.forEach((id) => {
-          const d = document.createElement("div");
-          d.className = "device";
-          d.innerHTML = `<div class="device-id">${id.slice(0, 8)}…</div><div class="device-status">Online — sẵn sàng ghi âm</div>`;
-          devicesDiv.appendChild(d);
-        });
-      }
-
-      const ws = new WebSocket(
-        `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/chat?type=browser`,
-      );
-
-      ws.onopen = () => {
-        connDot.classList.remove("off");
-        connLabel.textContent = "Dashboard đã kết nối server";
-        addTimeline("server", "connected", "Browser dashboard online");
-      };
-      ws.onclose = () => {
-        connDot.classList.add("off");
-        connLabel.textContent = "Mất kết nối — refresh trang";
-        setState("Offline");
+      socket.onclose = () => {
+        wsDot.classList.add("offline");
+        wsStatus.textContent = "Reconnecting...";
+        addLogEntry("server", "GATEWAY", "Connection closed, retrying in 3s...", "error");
+        setTimeout(connectWs, 3000);
       };
 
-      ws.onmessage = async (evt) => {
+      socket.onmessage = async (evt) => {
         if (evt.data instanceof Blob) {
-          const chunk = new Uint8Array(await evt.data.arrayBuffer());
-          incomingAudioChunks.push(chunk);
-          const received = incomingAudioChunks.reduce((s, c) => s + c.length, 0);
-          if (expectingTts && received >= expectedTtsSize) {
-            const full = new Uint8Array(received);
+          const buffer = await evt.data.arrayBuffer();
+          ttsAudioChunks.push(new Uint8Array(buffer));
+          const totalReceived = ttsAudioChunks.reduce((acc, c) => acc + c.length, 0);
+
+          if (totalReceived >= expectedTtsSize && expectedTtsSize > 0) {
+            const combined = new Uint8Array(totalReceived);
             let offset = 0;
-            for (const c of incomingAudioChunks) {
-              full.set(c, offset);
+            for (const c of ttsAudioChunks) {
+              combined.set(c, offset);
               offset += c.length;
             }
-            const blob = new Blob([full.buffer], { type: "audio/mpeg" });
-            ttsPlayer.src = URL.createObjectURL(blob);
-            ttsPlayer.play().catch(() => {});
-            incomingAudioChunks = [];
-            expectingTts = false;
+            const blob = new Blob([combined.buffer], { type: "audio/mpeg" });
+            audioPlayer.src = URL.createObjectURL(blob);
+            audioPlayer.style.display = "block";
+            audioPlayer.play().catch(() => {});
+            ttsAudioChunks = [];
             expectedTtsSize = 0;
-            setState("Phát TTS xong");
+            setStep("idle");
           }
           return;
         }
 
-        let data;
-        try { data = JSON.parse(evt.data); } catch { return; }
+        try {
+          const data = JSON.parse(evt.data);
+          const ev = data.event;
 
-        const ev = data.event;
-        const sid = data.session_id || "";
+          if (ev === "interaction") {
+            addLogEntry(data.direction, data.step.toUpperCase(), data.detail || "");
+            if (data.step === "audio_chunk") setStep("rec");
+            if (data.step === "stt_start") setStep("stt");
+            if (data.step === "llm_start") setStep("llm");
+            if (data.step === "tts_start") setStep("tts");
+            if (data.step === "turn_complete") setStep("idle");
+            return;
+          }
 
-        if (ev === "interaction") {
-          addTimeline(data.direction, data.step, data.detail, sid);
-          if (data.step === "processing") setState("Đang xử lý...");
-          if (data.step === "stt_start") setState("Nhận dạng giọng nói...");
-          if (data.step === "llm_start") setState("AI đang trả lời...");
-          if (data.step === "tts_start" && data.direction === "server") setState("Tạo giọng nói...");
-          if (data.step === "playback_start") setState("Đang phát loa...");
-          if (data.step === "turn_complete") setState("Chờ ESP32");
-          return;
-        }
-
-        if (ev === "esp32_status") {
-          deviceList = data.devices || [];
-          renderDevices();
-          setState(deviceList.length ? "ESP32 online" : "Chờ ESP32");
-        } else if (ev === "esp32_connected") {
-          if (!deviceList.includes(data.session_id)) deviceList.push(data.session_id);
-          renderDevices();
-          addTimeline("esp32->server", "connected", "ESP32 vừa kết nối", sid);
-          setState("ESP32 online");
-        } else if (ev === "esp32_disconnected") {
-          deviceList = deviceList.filter((d) => d !== data.session_id);
-          renderDevices();
-          addTimeline("esp32->server", "disconnected", "ESP32 ngắt kết nối", sid);
-          setState(deviceList.length ? "ESP32 online" : "Chờ ESP32");
-        } else if (ev === "processing") {
-          setState("Đang xử lý...");
-        } else if (ev === "transcript") {
-          lastTranscript.textContent = data.text;
-          addTimeline("server->esp32", "transcript", data.text, sid);
-        } else if (ev === "assistant_text") {
-          lastAnswer.textContent = data.text;
-          addTimeline("server->esp32", "assistant_text", data.text, sid);
-        } else if (ev === "tts_start") {
-          expectingTts = true;
-          expectedTtsSize = data.size || 0;
-          incomingAudioChunks = [];
-          addTimeline("server->esp32", "tts_start", `${expectedTtsSize} bytes MP3`, sid);
-          setState("Nhận audio TTS...");
-        } else if (ev === "tts_end") {
-          addTimeline("server->esp32", "tts_end", "Hoàn tất stream TTS", sid);
-        } else if (ev === "stt_empty") {
-          addTimeline("server->esp32", "stt_empty", "Không nghe rõ", sid);
-          setState("STT rỗng");
-        } else if (ev === "error") {
-          addTimeline("server", "error", data.message, sid);
-          setState("Lỗi");
+          if (ev === "esp32_status") {
+            updateDevices(data.devices || []);
+          } else if (ev === "esp32_connected") {
+            addLogEntry("esp32->server", "HARDWARE", `ESP32 client joined: ${data.session_id.slice(0, 8)}`);
+            updateDevices([data.session_id]);
+          } else if (ev === "esp32_disconnected") {
+            addLogEntry("esp32->server", "HARDWARE", `ESP32 disconnected`);
+            updateDevices([]);
+          } else if (ev === "transcript") {
+            sttDisplay.textContent = data.text;
+          } else if (ev === "assistant_text") {
+            llmDisplay.textContent = data.text;
+          } else if (ev === "tts_start") {
+            expectedTtsSize = data.size || 0;
+            ttsAudioChunks = [];
+          } else if (ev === "error") {
+            addLogEntry("server", "ERROR", data.message || "An unknown error occurred");
+            setStep("idle");
+          }
+        } catch (e) {
+          console.error("Failed to parse message:", e);
         }
       };
+    }
 
-      document.getElementById("refreshBtn").onclick = () => location.reload();
-      document.getElementById("clearBtn").onclick = () => { timeline.innerHTML = ""; };
-    </script>
-  </body>
+    connectWs();
+
+    clearLogBtn.onclick = () => {
+      timeline.innerHTML = "";
+      logCounter = 0;
+      feedCount.textContent = "0 events";
+    };
+
+    testForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const val = testInput.value.trim();
+      if (!val) return;
+
+      testInput.value = "";
+      addLogEntry("server", "WEB_TEST", `Sent query: "${val}"`);
+      sttDisplay.textContent = val;
+      llmDisplay.textContent = "Thinking...";
+      setStep("llm");
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: val })
+        });
+        const json = await res.json();
+        llmDisplay.textContent = json.answer || "No response";
+        addLogEntry("server->esp32", "AI_REPLY", json.answer);
+        setStep("idle");
+      } catch (err) {
+        llmDisplay.textContent = "Failed to call AI API.";
+        addLogEntry("server", "ERROR", String(err));
+        setStep("idle");
+      }
+    };
+  </script>
+</body>
 </html>
